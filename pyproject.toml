@@ -1,0 +1,16 @@
+[project]
+name = "swarm2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "agno>=2.5.3",
+    "duckduckgo-search>=8.1.1",
+    "google-generativeai>=0.8.6",
+    "lancedb>=0.29.2",
+    "ollama>=0.6.1",
+    "pypdf>=6.7.2",
+    "sqlalchemy>=2.0.46",
+    "tantivy>=0.25.1",
+]
