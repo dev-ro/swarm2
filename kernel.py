@@ -13,12 +13,12 @@ from agno.models.ollama import Ollama
 from agno.knowledge import Knowledge
 from agno.vectordb.lancedb import LanceDb
 from agno.knowledge.embedder.openai import OpenAIEmbedder
-from agno.document import Document
+from agno.knowledge.document.base import Document
 from duckduckgo_search import DDGS
-from dotenv import load_dotenv
-
 from security import requires_permission, get_credential
 from docker_tools import SandboxedExecutor
+from screenshot_tool import capture_app_screenshot
+from qa_agent import analyze_ui_screenshot
 
 load_dotenv()
 
@@ -225,6 +225,40 @@ def execute_shell_command(cmd: str, require_network: bool = False) -> str:
     Pass require_network=True if you need internet access."""
     return sandbox.execute_shell(cmd, require_network)
 
+@self_healing_tool
+def save_ui_lesson(problem: str, solution: str, context: str = "Flutter") -> str:
+    """
+    Saves a learned UI/UX lesson to the Knowledge Base (LanceDB).
+    Future agents will query this database before writing logic.
+    """
+    lesson_data = {
+        "problem": problem,
+        "solution": solution,
+        "context": context
+    }
+    lesson_text = json.dumps(lesson_data)
+    
+    # Store as LanceDB knowledge
+    doc = Document(id=str(uuid.uuid4()), content=lesson_text, meta_data={"type": "ui_lesson", "context": context})
+    knowledge_base.load_documents([doc])
+    
+    return f"Lesson successfully saved to Knowledge Base: {lesson_text}"
+
+@self_healing_tool
+def query_ui_lessons(context: str = "Flutter") -> str:
+    """
+    Queries LanceDB for past UI/UX lessons. The agent MUST call this before writing new frontend code.
+    """
+    results = knowledge_base.search(f"{context} UI layout alignment color issues", num_documents=5)
+    if not results:
+        return f"No past UI lessons found for context: {context}."
+    
+    lessons = []
+    for r in results:
+        lessons.append(getattr(r, "content", getattr(r, "text", str(r))))
+        
+    return "Past UI lessons to keep in mind:\n" + "\n".join(lessons)
+
 class MasterAgent(Agent):
     """
     The "Brain": High-level planning and reasoning agent of the SOAE.
@@ -242,19 +276,26 @@ class MasterAgent(Agent):
             knowledge=knowledge_base,
             search_knowledge=True,
             read_chat_history=True,
-            tools=[spawn_worker, check_worker_status, list_dir, read_file, write_file, research_topic, get_credential, execute_python_code, execute_shell_command],
+            tools=[
+                spawn_worker, check_worker_status, list_dir, read_file, write_file, 
+                research_topic, get_credential, execute_python_code, execute_shell_command,
+                capture_app_screenshot, analyze_ui_screenshot, save_ui_lesson, query_ui_lessons
+            ],
             instructions=[
                 "You are the high-level planner and orchestrator.",
                 "Delegate any and all text summarization or log filtering tasks to your SummaryAgent to save costs and optimize processing.",
                 "Remember user context across sessions to maintain continuity.",
-                "Use your search_knowledge_base tool to find relevant information before answering questions.",
+                "Before writing frontend or UI code, YOU MUST call the query_ui_lessons tool to query past UI lessons and avoid previous mistakes.",
                 "Use spawn_worker to delegate complex tasks asynchronously to independent Ollama workers.",
                 "Use check_worker_status periodically to retrieve results of spawned workers.",
                 "Use the Universal Toolset (read_file, write_file, list_dir) to safely manipulate files in your sandboxed workspace directory.",
                 "Use the research_topic tool to run Deep Research loops, summarizing findings from the web directly into your knowledge base.",
                 "Use execute_python_code and execute_shell_command to safely run code or shell commands isolated in Docker.",
                 "Use get_credential(service_name) prior to executing code requiring external auth to securely fetch user tokens securely without hardcoding them.",
-                "The system enforces a Human-in-the-Loop policy. If you call write_file, spawn_worker, or request network access in the Sandbox, the user will be prompted to approve."
+                "The system enforces a Human-in-the-Loop policy. If you call write_file, spawn_worker, or request network access in the Sandbox, the user will be prompted to approve.",
+                "Use capture_app_screenshot(url) to take a picture of a running web app.",
+                "Use analyze_ui_screenshot(image_path) to pass images to your sibling QualityAssuranceAgent for UI critique.",
+                "When you resolve a UI bug based on visual feedback, use save_ui_lesson to persist the {problem, solution, context} to LanceDB so you never make that mistake again."
             ],
             **kwargs
         )
