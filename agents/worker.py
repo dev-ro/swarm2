@@ -3,9 +3,9 @@ import os
 import json
 from agno.agent import Agent
 from agno.models.ollama import Ollama
-from agno.knowledge.lancedb import LanceDbKnowledgeBase
+from agno.knowledge import Knowledge
 from agno.vectordb.lancedb import LanceDb
-from agno.embedder.openai import OpenAIEmbedder
+from agno.knowledge.embedder.openai import OpenAIEmbedder
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,11 +18,11 @@ def run_worker(role: str, goal: str, workspace_dir: str):
     print(f"Starting worker: Role='{role}', Goal='{goal}'")
     
     # Connect to shared LanceDB knowledge base
-    knowledge_base = LanceDbKnowledgeBase(
+    knowledge_base = Knowledge(
         vector_db=LanceDb(
             table_name="soae_knowledge",
             uri="tmp/lancedb",
-            embedder=OpenAIEmbedder(id="text-embedding-3-small"),
+            embedder=OpenAIEmbedder(id=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")),
         ),
     )
     
