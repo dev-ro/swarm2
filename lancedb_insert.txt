@@ -1,0 +1,1 @@
+(self, content_hash: str, documents: List[agno.knowledge.document.base.Document], filters: Optional[Dict[str, Any]] = None) -> None

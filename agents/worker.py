@@ -2,7 +2,7 @@ import argparse
 import os
 import json
 from agno.agent import Agent
-from agno.models.ollama import Ollama
+from agno.models.google import Gemini
 from agno.knowledge import Knowledge
 from agno.vectordb.lancedb import LanceDb
 from agno.knowledge.embedder.openai import OpenAIEmbedder
@@ -12,7 +12,7 @@ load_dotenv()
 
 def run_worker(role: str, goal: str, workspace_dir: str):
     """
-    Runs an independent worker agent using Local DeepSeek (Ollama)
+    Runs an independent worker agent using Gemini
     and shared LanceDB knowledge.
     """
     print(f"Starting worker: Role='{role}', Goal='{goal}'")
@@ -26,11 +26,11 @@ def run_worker(role: str, goal: str, workspace_dir: str):
         ),
     )
     
-    # Create the local DeepSeek agent
+    # Create the Gemini agent
     agent = Agent(
         name="LocalWorker",
         role=role,
-        model=Ollama(id="deepseek-r1:8b"),
+        model=Gemini(id=os.getenv("LIGHT_MODEL", "gemini-2.5-flash")),
         knowledge=knowledge_base,
         search_knowledge=True, # Allow it to search the shared KB
         instructions=[

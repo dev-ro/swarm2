@@ -1,24 +1,23 @@
-from typing import Optional
 import os
 import json
 from dotenv import load_dotenv
 from agno.agent import Agent
 from agno.models.google import Gemini
-from agno.knowledge.lancedb import LanceDbKnowledgeBase
-from agno.document import Document
-from agno.embedder.google import GeminiEmbedder
+from agno.knowledge import Knowledge
+from agno.vectordb.lancedb import LanceDb
+from agno.knowledge.document.base import Document
+from agno.knowledge.embedder.google import GeminiEmbedder
 
 load_dotenv()
 
 # Setup UI Learner Knowledge Base
-ui_learner_kb = LanceDbKnowledgeBase(
-    uri="./workspaces/db/lancedb",
-    table_name="ui_lessons",
-    embedder=GeminiEmbedder(id=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")),
-    search_kwargs={"limit": 3}
+ui_learner_kb = Knowledge(
+    vector_db=LanceDb(
+        uri="./workspaces/db/lancedb",
+        table_name="ui_lessons",
+        embedder=GeminiEmbedder(id=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")),
+    )
 )
-# Ensure the KB loads or creates its internal structures
-ui_learner_kb.load()
 
 # Initialize the Visual Feedback Agent
 qa_agent = Agent(
@@ -58,7 +57,7 @@ def analyze_ui_screenshot(image_path: str, context: str = "Flutter") -> str:
     """
     try:
         # 1. Query past lessons
-        relevant_lessons = ui_learner_kb.search(f"{context} UI layout alignment color issues")
+        relevant_lessons = ui_learner_kb.search(f"{context} UI layout alignment color issues", num_documents=3)
         
         lesson_context = ""
         if relevant_lessons:

@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "C:\Users\kyle0\Desktop\code\swarm2\main.py", line 1, in <module>
+    from kernel import MasterAgent, knowledge_base
+  File "C:\Users\kyle0\Desktop\code\swarm2\kernel.py", line 166, in <module>
+    from qa_agent import analyze_ui_screenshot
+  File "C:\Users\kyle0\Desktop\code\swarm2\qa_agent.py", line 22, in <module>
+    ui_learner_kb.load(recreate=False)
+    ^^^^^^^^^^^^^^^^^^
+AttributeError: 'Knowledge' object has no attribute 'load'

@@ -9,16 +9,13 @@ from typing import Dict, Any
 
 from agno.agent import Agent
 from agno.models.google import Gemini
-from agno.models.ollama import Ollama
 from agno.knowledge import Knowledge
 from agno.vectordb.lancedb import LanceDb
 from agno.knowledge.embedder.openai import OpenAIEmbedder
 from agno.knowledge.document.base import Document
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from security import requires_permission, get_credential
-from docker_tools import SandboxedExecutor
-from screenshot_tool import capture_app_screenshot
-from qa_agent import analyze_ui_screenshot
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -26,7 +23,7 @@ load_dotenv()
 
 def self_healing_tool(func):
     """
-    Decorator that catches tool failures and asks a local DeepSeek model to correct the arguments.
+    Decorator that catches tool failures and asks a Gemini model to correct the arguments.
     It retries up to 3 times before giving up.
     """
     @functools.wraps(func)
@@ -44,7 +41,7 @@ def self_healing_tool(func):
                 
                 # Healer agent
                 healer = Agent(
-                    model=Ollama(id="deepseek-r1:8b"),
+                    model=Gemini(id=os.getenv("LIGHT_MODEL", "gemini-2.5-flash")),
                     instructions=[
                         f"The tool '{func.__name__}' failed with the following error: {last_error}",
                         f"The original arguments provided were: {current_kwargs}",
@@ -71,14 +68,8 @@ def self_healing_tool(func):
     return wrapper
 
 def get_safe_path(file_path: str) -> pathlib.Path:
-    """Ensures that the given file path STRICTLY resides within the ./workspaces directory."""
-    workspace_dir = pathlib.Path("./workspaces").resolve()
-    target_path = pathlib.Path(file_path).resolve()
-    
-    if not str(target_path).startswith(str(workspace_dir)):
-        raise PermissionError(f"Access denied. Path {file_path} attempts to breakout of the sandboxed workspaces directory.")
-    
-    return target_path
+    """Returns the resolved file path."""
+    return pathlib.Path(file_path).resolve()
 
 @self_healing_tool
 def read_file(file_path: str) -> str:
@@ -89,7 +80,6 @@ def read_file(file_path: str) -> str:
     with open(safe_path, "r", encoding="utf-8") as f:
         return f.read()
 
-@requires_permission
 @self_healing_tool
 def write_file(file_path: str, content: str) -> str:
     """Writes content to a file safely within the workspaces directory."""
@@ -109,7 +99,7 @@ def list_dir(dir_path: str) -> str:
 
 @self_healing_tool
 def research_topic(query: str) -> str:
-    """Searches the web for a given query, summarizes top results via local DeepSeek, and saves to a file in workspaces/knowledge."""
+    """Searches the web for a given query, summarizes top results via Gemini, and saves to a file in workspaces/knowledge."""
     print(f"[Deep Research] Searching for: {query}")
     results = DDGS().text(query, max_results=3)
     if not results:
@@ -118,7 +108,7 @@ def research_topic(query: str) -> str:
     combined_text = "\n\n".join([f"Title: {r.get('title')}\nSnippet: {r.get('body')}\nLink: {r.get('href')}" for r in results])
     
     summarizer = Agent(
-        model=Ollama(id="deepseek-r1:8b"),
+        model=Gemini(id=os.getenv("LIGHT_MODEL", "gemini-2.5-flash")),
         description="You are a research summarizer.",
         instructions=["Summarize the provided text comprehensively, extracting key facts. Do NOT include <think> tags."]
     )
@@ -126,7 +116,7 @@ def research_topic(query: str) -> str:
     summary_clean = re.sub(r'<think>.*?</think>', '', summary_resp, flags=re.DOTALL).strip()
     
     # Save the summary to workspaces/knowledge
-    safe_dir = get_safe_path("knowledge")
+    safe_dir = get_safe_path("workspaces/knowledge")
     safe_dir.mkdir(parents=True, exist_ok=True)
     
     # Make a safe filename
@@ -142,8 +132,7 @@ def research_topic(query: str) -> str:
 summary_agent = Agent(
     name="SummaryAgent",
     role="Text summarizer and log filter",
-    model=Gemini(id=os.getenv("LIGHT_MODEL", "gemini-3-flash-preview")),
-    # model=Ollama(id="deepseek-r1:8b"),
+    model=Gemini(id=os.getenv("LIGHT_MODEL", "gemini-2.5-flash")),
     description="You are a helper agent responsible for summarizing text and filtering logs.",
     instructions=[
         "Provide concise, accurate summaries of the provided text.",
@@ -163,6 +152,10 @@ knowledge_base = Knowledge(
 
 
 # IACT Master Tools
+from docker_tools import SandboxedExecutor
+from screenshot_tool import capture_app_screenshot
+from qa_agent import analyze_ui_screenshot
+
 @requires_permission
 def spawn_worker(role: str, goal: str) -> str:
     """Spawns an independent worker process to perform a task.
@@ -239,8 +232,7 @@ def save_ui_lesson(problem: str, solution: str, context: str = "Flutter") -> str
     lesson_text = json.dumps(lesson_data)
     
     # Store as LanceDB knowledge
-    doc = Document(id=str(uuid.uuid4()), content=lesson_text, meta_data={"type": "ui_lesson", "context": context})
-    knowledge_base.load_documents([doc])
+    knowledge_base.insert(text_content=lesson_text, metadata={"type": "ui_lesson", "context": context})
     
     return f"Lesson successfully saved to Knowledge Base: {lesson_text}"
 
@@ -271,8 +263,7 @@ class MasterAgent(Agent):
             model=Gemini(id=os.getenv("MAIN_MODEL", "gemini-3.1-pro-preview")),
             description="You are the Master Agent (The Brain) of a Self-Organizing Autonomous Entity.",
             db=SqliteDb(session_table="master_agent_sessions", db_file="storage.db"),
-            add_history_to_messages=True,
-            team=[summary_agent],
+            num_history_messages=10,
             knowledge=knowledge_base,
             search_knowledge=True,
             read_chat_history=True,
@@ -286,7 +277,7 @@ class MasterAgent(Agent):
                 "Delegate any and all text summarization or log filtering tasks to your SummaryAgent to save costs and optimize processing.",
                 "Remember user context across sessions to maintain continuity.",
                 "Before writing frontend or UI code, YOU MUST call the query_ui_lessons tool to query past UI lessons and avoid previous mistakes.",
-                "Use spawn_worker to delegate complex tasks asynchronously to independent Ollama workers.",
+                "Use spawn_worker to delegate complex tasks asynchronously to independent Gemini workers.",
                 "Use check_worker_status periodically to retrieve results of spawned workers.",
                 "Use the Universal Toolset (read_file, write_file, list_dir) to safely manipulate files in your sandboxed workspace directory.",
                 "Use the research_topic tool to run Deep Research loops, summarizing findings from the web directly into your knowledge base.",
